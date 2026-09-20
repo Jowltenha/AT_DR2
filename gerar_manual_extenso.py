@@ -1,0 +1,40 @@
+import os
+
+def gerar_manual_extenso(caminho_arquivo: str = "manual_extenso_caldeira.txt") -> List[str]:
+    """Gera localmente um manual técnico fictício extenso com 22 parágrafos detalhados
+
+    sobre a manutenção e operação da Caldeira Industrial Modelo CG-800.
+    """
+    paragrafos = [
+        "1. VISÃO GERAL DO SISTEMA: A Caldeira Industrial Modelo CG-800 é um equipamento aquatubular de alta pressão projetado para geração contínua de vapor saturado em plantas químicas e alimentícias.",
+        "2. NORMAS DE SEGURANÇA OPERACIONAL: A operação da Caldeira CG-800 deve seguir rigorosamente a norma NR-13. Operadores devem utilizar EPIs completos contendo capacete, protetor auricular, óculos de segurança e luvas térmicas de alta resistência.",
+        "3. INSPEÇÃO DIÁRIA DE PRÉ-PARTIDA: Antes da partida inicial de cada turno, o operador deve inspecionar visivelmente o nível de água no visor de vidro, verificar a pressão do ar de combustão e atestar a ausência de vazamentos na linha de gás.",
+        "4. TRATAMENTO QUÍMICO DA ÁGUA DE ALIMENTAÇÃO: A água de alimentação deve passar por desmineralização prévia. O pH deve ser mantido entre 10.5 e 11.5 para prevenir corrosão interna por oxigênio dissolvido nas tubulações de vapor.",
+        "5. SISTEMA DE QUEIMADORES E IGNIÇÃO: O sistema de ignição opera com dois eletrodos de faísca alimentados por transformador de 10kV. A chama principal é monitorada continuamente por fotocélula UV de alta sensibilidade.",
+        "6. CONTROLE DE PRESSÃO DO TAMBOR DE VAPOR: A pressão nominal de trabalho é de 25 bar. Caso a pressão atinja 28 bar, a válvula de alívio mecânica primária se abrirá automaticamente para purga de emergência.",
+        "7. PURGA CONTINUA E PURGA DE FUNDO: A purga contínua deve ser ajustada para 3% da vazão total para controle de sólidos totais dissolvidos (STD). A purga de fundo de lama deve ser executada a cada 8 horas por 5 segundos.",
+        "8. SISTEMA DE VENTILAÇÃO FORÇADA: O ventilador de tiragem forçada possui motor trifásico de 75 cv controlado por inversor de frequência. O alinhamento das pás do rotor deve ser verificado semestralmente.",
+        "9. ECONOMIZADOR E REPETIDOR DE CALOR: O economizador aproveita os gases de exaustão a 320°C para pré-aquecer a água de entrada de 60°C para 110°C, aumentando a eficiência térmica global do sistema em 8.5%.",
+        "10. MANUTENÇÃO PREVENTIVA MENSAL DO EXAUSTOR: Inspecionar o acoplamento elástico entre o motor e o exaustor. Verificar se há acúmulo de fuligem nas palhetas e medir a vibração global nos mancais de rolamento.",
+        "11. PROCEDIMENTO DE TORQUE NO FLANGE DE EXAUSTÃO PRINCIPAL: No módulo de exaustão traseira (Seção M-12), os parafusos M24 do flange metálico principal devem ser apertados com torque exato de 340 Nm utilizando torquímetro calibrado. A lubrificação das roscas exige graxa fluorada especial de alta temperatura (Graxa Klüberalfa HX 83-302) aplicada a cada 6 meses.",
+        "12. REFRATÁRIOS E ISOLAMENTO TÉRMICO DA CÂMARA DE COMBUSTÃO: O concreto refratário da parede de fundo deve ser inspecionado contra trincas maiores que 3mm. Trincas menores podem ser seladas com argamassa aluminosa de cura rápida.",
+        "13. CALIBRAÇÃO DOS TRANSMISSORES DE PRESSÃO E TEMPERATURA: Todos os transmissores de pressão 4-20mA e PT-100 de temperatura devem passar por calibração anual por laboratório acreditado pela RBC/Inmetro.",
+        "14. PAINEL ELÉTRICO E CLP DE AUTOMACÃO: O controle do processo é realizado por CLP Siemens S7-1500. As conexões elétricas nos bornes e contatores devem ser reapertadas a cada 12 meses com chave dinamométrica.",
+        "15. VÁLVULAS DE RETENÇÃO E BLOQUEIO: As válvulas de retenção de água de alimentação devem ser desmontadas e ter seus discos usinados a cada 24 meses de operação contínua para garantir estanqueidade total.",
+        "16. PROCEDIMENTO DE PARADA DE EMERGÊNCIA: Em caso de falha de chama ou queda do nível de água abaixo do limite crítico LLS, o sistema acionará o corte instantâneo da válvula solenóide de gás em menos de 1 segundo.",
+        "17. LIMPEZA QUÍMICA DAS TUBULAÇÕES (DESINCRUSTAÇÃO): A desincrustação ácida com solução de ácido inibido a 5% deve ser realizada apenas se a espessura da incrustação nos tubos ultrapassar 1.5mm.",
+        "18. TESTE HIDROSTÁTICO DE INTEGRIDADE ESTRUTURAL: A cada 5 anos ou após grandes reparos com solda, a caldeira deve ser submetida a teste hidrostático com pressão de teste igual a 1.5 vezes a pressão de projeto.",
+        "19. BOMBAS DE ALIMENTAÇÃO DE RESERVA (STATIONARY PUMPS): As duas bombas multicestágio de alimentação operam em esquema principal/reserva (1H1B). O alternamento automático ocorre a cada 72 horas de funcionamento.",
+        "20. SISTEMA DE AMANECIMENTO E PRÉ-AQUECIMENTO LENTO: A elevação de temperatura do estado frio até a pressão de regime deve durar no mínimo 120 minutos para evitar choque térmico nas juntas de expansão.",
+        "21. REGISTRO DE O.S. E LIVRO DE LOG DA CALDEIRA: Todas as anotações de pressão, temperatura, consumo de combustível e ocorrências de alarmes devem ser inseridas no livro de log físico e digital diariamente.",
+        "22. DESCARTE DE EFLUENTES E CINZAS: A água proveniente das purgas de fundo deve passar por tanque de refrigeração e neutralização de pH antes de ser lançada na rede de efluentes industriais da planta."
+    ]
+
+    with open(caminho_arquivo, "w", encoding="utf-8") as f:
+        f.write("\n\n".join(paragrafos))
+
+    print(f"[OK] Manual extenso gerado com {len(paragrafos)} parágrafos em '{caminho_arquivo}'.")
+    return paragrafos
+
+if __name__ == "__main__":
+    gerar_manual_extenso()

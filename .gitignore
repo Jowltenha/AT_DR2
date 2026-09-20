@@ -1,0 +1,30 @@
+# Ambiente Virtual Python
+venv/
+.venv/
+env/
+
+# Arquivos de Configuração e Chaves de API (Segurança)
+.env
+.env.local
+.env.*.local
+
+# Cache do Python e compilação
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Bancos de dados SQLite gerados em tempo de execução
+*.db
+*.sqlite
+*.sqlite3
+
+# Arquivos temporários do Sistema Operacional e IDEs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Arquivos privados do aluno
+ROTEIRO_VIDEO.md
