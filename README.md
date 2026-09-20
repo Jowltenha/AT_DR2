@@ -3,7 +3,7 @@
 **Aluno:** João Pedro Barboza  
 **Curso:** Desenvolvimento com IA / Engenharia de Software  
 **Ambiente de Desenvolvimento:** Antigravity IDE  / Python 3.14  
-**Vídeo de Apresentação:** [Link do Vídeo no YouTube (Não Listado)](https://youtu.be/hxg10qvkplM)
+**Vídeo de Apresentação:** [Link do Vídeo no YouTube](https://youtu.be/cKUgFkG3MQo)
 
 ---
 
