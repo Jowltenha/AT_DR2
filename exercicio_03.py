@@ -2,12 +2,10 @@ import asyncio
 import os
 from typing import List, Optional
 from dotenv import load_dotenv
-from openai import AsyncOpenAI, OpenAI
 from pydantic import BaseModel, Field
+from agents import Agent, Runner
 
 load_dotenv()
-
-# --- MODELO DE SAÍDA ESTRUTURADA (output_type) ---
 
 
 class DiagnosticOutput(BaseModel):
@@ -26,7 +24,6 @@ class DiagnosticOutput(BaseModel):
     )
 
 
-# --- INSTRUÇÃO DE SISTEMA (SYSTEM MESSAGE) ---
 SYSTEM_INSTRUCTIONS = """
 Você é um agente especialista em diagnóstico de equipamentos industriais.
 
@@ -42,150 +39,48 @@ Sempre que o diagnóstico ou procedimento envolver situações de risco, você D
 """
 
 
-# --- PRIMITIVOS DO SDK: AGENT & RUNNER ---
-
-
-class Agent:
-    """Primitivo Agent: Encapsula as instruções, modelo e o tipo de saída esperada."""
-
-    def __init__(
-        self,
-        name: str,
-        instructions: str,
-        output_type: type[BaseModel],
-        model: Optional[str] = None,
-    ):
-        self.name = name
-        self.instructions = instructions
-        self.output_type = output_type
-        self.model = model or os.getenv("OPENAI_MODEL", "ag/gemini-3.6-flash-high")
-        self.api_key = os.getenv("OPENAI_API_KEY", "mock-key")
-        self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-
-
-class Runner:
-    """Primitivo Runner: Mecanismo responsável pela execução do agente (Modo Síncrono e Assíncrono)."""
-
-    @staticmethod
-    async def run(agent: Agent, user_prompt: str) -> DiagnosticOutput:
-        """Execução ASSÍNCRONA do Agente."""
-        async_client = AsyncOpenAI(api_key=agent.api_key, base_url=agent.base_url)
-        try:
-            # Solicita resposta no formato JSON respeitando o schema do Pydantic
-            prompt_com_schema = (
-                f"{user_prompt}\n\n"
-                f"Responda no formato JSON obrigatoriamente compatível com a estrutura:\n"
-                f"{agent.output_type.model_json_schema()}"
-            )
-            response = await async_client.chat.completions.create(
-                model=agent.model,
-                messages=[
-                    {"role": "system", "content": agent.instructions},
-                    {"role": "user", "content": prompt_com_schema},
-                ],
-                temperature=0.2,
-                response_format={"type": "json_object"},
-            )
-            raw_content = response.choices[0].message.content or "{}"
-            return agent.output_type.model_validate_json(raw_content)
-        except Exception as e:
-            # Fallback robusto simulado para demonstração sem API real
-            if "férias" in user_prompt.lower() or "reembolso" in user_prompt.lower():
-                return DiagnosticOutput(
-                    categoria="Recusa de Escopo",
-                    equipamento=None,
-                    diagnostico_ou_resposta="Recuso o atendimento. Como agente de diagnóstico industrial, não possuo autorização para responder a dúvidas administrativas ou de recursos humanos.",
-                    regras_seguranca_aplicadas=[],
-                )
-            return DiagnosticOutput(
-                categoria="Diagnóstico Técnico & Segurança",
-                equipamento="Caldeira / Motor",
-                diagnostico_ou_resposta=f"Para realizar a manutenção na caldeira sob alta temperatura e pressão, deve-se aguardar o resfriamento. (Info API: {e})",
-                regras_seguranca_aplicadas=[
-                    "REGRA SEG-01: Despressurização prévia de 30 min e EPI Nível 4.",
-                    "REGRA SEG-02: Arrefecimento secundário para operação acima de 85°C.",
-                ],
-            )
-
-    @staticmethod
-    def run_sync(agent: Agent, user_prompt: str) -> DiagnosticOutput:
-        """Execução SÍNCRONA do Agente."""
-        sync_client = OpenAI(api_key=agent.api_key, base_url=agent.base_url)
-        try:
-            prompt_com_schema = (
-                f"{user_prompt}\n\n"
-                f"Responda no formato JSON obrigatoriamente compatível com a estrutura:\n"
-                f"{agent.output_type.model_json_schema()}"
-            )
-            response = sync_client.chat.completions.create(
-                model=agent.model,
-                messages=[
-                    {"role": "system", "content": agent.instructions},
-                    {"role": "user", "content": prompt_com_schema},
-                ],
-                temperature=0.2,
-                response_format={"type": "json_object"},
-            )
-            raw_content = response.choices[0].message.content or "{}"
-            return agent.output_type.model_validate_json(raw_content)
-        except Exception as e:
-            if "férias" in user_prompt.lower() or "reembolso" in user_prompt.lower():
-                return DiagnosticOutput(
-                    categoria="Recusa de Escopo",
-                    equipamento=None,
-                    diagnostico_ou_resposta="Recuso o atendimento. Como agente de diagnóstico industrial, não possuo autorização para responder a dúvidas administrativas ou de recursos humanos.",
-                    regras_seguranca_aplicadas=[],
-                )
-            return DiagnosticOutput(
-                categoria="Diagnóstico Técnico & Segurança",
-                equipamento="Caldeira Industrial",
-                diagnostico_ou_resposta=f"Procedimento de intervenção técnica na Caldeira requer despressurização rigorosa. (Info API: {e})",
-                regras_seguranca_aplicadas=[
-                    "REGRA SEG-01: Qualquer intervenção em caldeiras pressurizadas exige despressurização prévia de no mínimo 30 minutos e uso de EPI térmico Nível 4."
-                ],
-            )
-
-
-# --- EXECUÇÃO DEMONSTRATIVA ---
-
-
 async def main():
     print("=" * 70)
-    print(" EXERCÍCIO 3 - AGENTE DE DIAGNÓSTICO COM PRIMITIVOS DO SDK ")
+    print(" EXERCÍCIO 3 - AGENTE DE DIAGNÓSTICO COM PRIMITIVOS DO OPENAI AGENTS SDK ")
     print("=" * 70)
 
-    # Configuração explícita do Agent
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    if not model_name or "/" in model_name:
+        model_name = "gpt-4o-mini"
+
     agente_diagnostico = Agent(
         name="AgenteDiagnosticoIndustrial",
         instructions=SYSTEM_INSTRUCTIONS,
         output_type=DiagnosticOutput,
-        model=os.getenv("OPENAI_MODEL", "ag/gemini-3.6-flash-high"),
+        model=model_name,
     )
 
-    # 1. Teste de Chamada Assíncrona (Runner.run) - Pergunta Técnica com Regras de Segurança
     prompt_tecnico = "Preciso realizar uma manutenção de emergência na Caldeira 02 que está operando sob alta pressão e o motor atingiu 90°C. Como devo proceder?"
-    print(f"\n[1. Chamada Assíncrona - Runner.run]")
+    print(f"\n[1. Chamada Assíncrona - Runner.run (Diagnóstico Técnico)]")
     print(f"Pergunta Técnico: {prompt_tecnico}\n")
 
     resultado_async = await Runner.run(agente_diagnostico, prompt_tecnico)
-    print("--- Resultado Estruturado (DiagnosticOutput) ---")
-    print(f"Categoria: {resultado_async.categoria}")
-    print(f"Equipamento: {resultado_async.equipamento}")
-    print(f"Resposta: {resultado_async.diagnostico_ou_resposta}")
-    print(f"Regras de Segurança Aplicadas: {resultado_async.regras_seguranca_aplicadas}")
+    out_async: DiagnosticOutput = resultado_async.final_output
 
-    # 2. Teste de Chamada Síncrona (Runner.run_sync) - Pergunta Administrativa (Recusa de Escopo)
+    print("--- Resultado Estruturado (DiagnosticOutput) ---")
+    print(f"Categoria: {out_async.categoria}")
+    print(f"Equipamento: {out_async.equipamento}")
+    print(f"Resposta: {out_async.diagnostico_ou_resposta}")
+    print(f"Regras de Segurança Aplicadas: {out_async.regras_seguranca_aplicadas}")
+
     prompt_admin = "Como faço para solicitar o reembolso da minha viagem de trabalho e marcar minhas férias para o mês que vem?"
     print("\n" + "-" * 70)
-    print(f"[2. Chamada Síncrona - Runner.run_sync]")
+    print(f"[2. Chamada de Validação de Escopo - Runner.run (Pergunta Administrativa)]")
     print(f"Pergunta Técnico (Administrativa): {prompt_admin}\n")
 
-    resultado_sync = Runner.run_sync(agente_diagnostico, prompt_admin)
+    resultado_admin = await Runner.run(agente_diagnostico, prompt_admin)
+    out_admin: DiagnosticOutput = resultado_admin.final_output
+
     print("--- Resultado Estruturado (DiagnosticOutput) ---")
-    print(f"Categoria: {resultado_sync.categoria}")
-    print(f"Equipamento: {resultado_sync.equipamento}")
-    print(f"Resposta: {resultado_sync.diagnostico_ou_resposta}")
-    print(f"Regras de Segurança Aplicadas: {resultado_sync.regras_seguranca_aplicadas}")
+    print(f"Categoria: {out_admin.categoria}")
+    print(f"Equipamento: {out_admin.equipamento}")
+    print(f"Resposta: {out_admin.diagnostico_ou_resposta}")
+    print(f"Regras de Segurança Aplicadas: {out_admin.regras_seguranca_aplicadas}")
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 import asyncio
 import json
 import os
-from typing import Any, Callable, Dict, List, Optional
+from typing import List
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
+from agents import Agent, Runner, function_tool
 from gerar_manual import gerar_manual_json
 
 load_dotenv()
@@ -50,13 +50,6 @@ class DiagnosticoEquipamento(BaseModel):
     )
 
 
-class AgentResult:
-    """Wrapper para encapsular o resultado da execução e disponibilizar o atributo result.final_output."""
-
-    def __init__(self, final_output: DiagnosticoEquipamento):
-        self.final_output = final_output
-
-
 # --- 2. EXCEÇÃO E FERRAMENTA ASSÍNCRONA COM FAILURE_ERROR_FUNCTION ASSÍNCRONO ---
 
 
@@ -66,46 +59,17 @@ class EquipamentoNaoEncontradoError(Exception):
     pass
 
 
-async def failure_error_function_async(error: Exception) -> str:
-    """Tratador assíncrono de erros para a ferramenta de consulta de manual.
-
-    Permite processar falhas de forma não-bloqueante para múltiplas requisições simultâneas.
-    """
+async def failure_error_function_async(ctx, error: Exception) -> str:
+    """Tratador assíncrono de erros para a ferramenta de consulta de manual."""
     if isinstance(error, EquipamentoNaoEncontradoError):
         return f"[ERRO ASSÍNCRONO TRATADO VIA failure_error_function]: {str(error)}. Verifique a solicitação."
     return f"[FALHA INESPERADA NA FERRAMENTA ASSÍNCRONA]: {str(error)}"
 
 
-def async_function_tool(
-    func: Callable, failure_handler: Optional[Callable] = None
-) -> Dict[str, Any]:
-    tool_spec = {
-        "type": "function",
-        "function": {
-            "name": func.__name__,
-            "description": func.__doc__ or "Sem descrição.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "codigo_equipamento": {
-                        "type": "string",
-                        "description": "Código do equipamento a consultar (ex: EQ-101, EQ-999).",
-                    }
-                },
-                "required": ["codigo_equipamento"],
-            },
-        },
-    }
-    return {
-        "spec": tool_spec,
-        "callable": func,
-        "failure_handler": failure_handler,
-    }
-
-
-async def _consultar_manual_async_impl(codigo_equipamento: str) -> str:
-    """Implementação assíncrona da leitura do arquivo de manual JSON."""
-    await asyncio.sleep(0.01)  # Simula I/O assíncrono não-bloqueante
+@function_tool(failure_error_function=failure_error_function_async)
+async def consultar_manual_async_tool(codigo_equipamento: str) -> str:
+    """[MANUAL TÉCNICO DE FÁBRICA]: Consulta o manual técnico pelo código do equipamento (ex: 'EQ-101', 'EQ-102'). ATENÇÃO: Passe apenas o código do equipamento (ex: 'EQ-101'). Não passe códigos de erro como 'ERR-01'."""
+    await asyncio.sleep(0.01)
 
     if not os.path.exists(MANUAL_FILE):
         raise FileNotFoundError(f"Arquivo '{MANUAL_FILE}' não encontrado.")
@@ -122,168 +86,29 @@ async def _consultar_manual_async_impl(codigo_equipamento: str) -> str:
     )
 
 
-consultar_manual_async_tool = async_function_tool(
-    _consultar_manual_async_impl, failure_handler=failure_error_function_async
-)
-
-
-# --- 3. AGENTE E RUNNER COM SUPORTE A FERRAMENTAS ASSÍNCRONAS E MODELOS ANINHADOS ---
-
-
-class Agent:
-    def __init__(
-        self,
-        name: str,
-        instructions: str,
-        output_type: type[BaseModel],
-        tools: List[Dict[str, Any]],
-    ):
-        self.name = name
-        self.instructions = instructions
-        self.output_type = output_type
-        self.tools = tools
-        self.api_key = os.getenv("OPENAI_API_KEY", "mock-key")
-        self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        self.model = os.getenv("OPENAI_MODEL", "ag/gemini-3.6-flash-high")
-        self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
-
-
-class Runner:
-    @staticmethod
-    async def run(agent: Agent, user_prompt: str) -> AgentResult:
-        """Executa a chamada assíncrona ao modelo com a tool assíncrona e retorna um AgentResult com result.final_output."""
-        tool_specs = [t["spec"] for t in agent.tools]
-        tool_map = {t["spec"]["function"]["name"]: t for t in agent.tools}
-
-        messages = [
-            {"role": "system", "content": agent.instructions},
-            {
-                "role": "user",
-                "content": (
-                    f"{user_prompt}\n\n"
-                    f"Responda OBRIGATORIAMENTE no formato JSON estritamente compatível com o schema:\n"
-                    f"{agent.output_type.model_json_schema()}"
-                ),
-            },
-        ]
-
-        try:
-            response = await agent.client.chat.completions.create(
-                model=agent.model,
-                messages=messages,
-                tools=tool_specs,
-                tool_choice="auto",
-                temperature=0.0,
-                response_format={"type": "json_object"},
-            )
-
-            res_msg = response.choices[0].message
-
-            if res_msg.tool_calls:
-                messages.append(res_msg)
-
-                for tc in res_msg.tool_calls:
-                    fn_name = tc.function.name
-                    fn_args = json.loads(tc.function.arguments)
-
-                    print(
-                        f" -> [Tool Assíncrona Chamada]: {fn_name}(codigo_equipamento='{fn_args.get('codigo_equipamento')}')"
-                    )
-
-                    tool_obj = tool_map[fn_name]
-                    fn_impl = tool_obj["callable"]
-                    failure_handler = tool_obj.get("failure_handler")
-
-                    try:
-                        # Invocação assíncrona da ferramenta com await
-                        if asyncio.iscoroutinefunction(fn_impl):
-                            tool_res = await fn_impl(**fn_args)
-                        else:
-                            tool_res = fn_impl(**fn_args)
-                    except Exception as err:
-                        print(
-                            f" ⚠️ [Exceção Capturada na Tool Assíncrona]: {err}"
-                        )
-                        if failure_handler:
-                            if asyncio.iscoroutinefunction(failure_handler):
-                                tool_res = await failure_handler(err)
-                            else:
-                                tool_res = failure_handler(err)
-                            print(
-                                f" 🛡️ [Tratamento via failure_error_function_async]: {tool_res}"
-                            )
-                        else:
-                            raise err
-
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": str(tool_res),
-                        }
-                    )
-
-                # Chamada final para geração da estrutura JSON aninhada
-                final_res = await agent.client.chat.completions.create(
-                    model=agent.model,
-                    messages=messages,
-                    temperature=0.0,
-                    response_format={"type": "json_object"},
-                )
-                raw_json = final_res.choices[0].message.content or "{}"
-            else:
-                raw_json = res_msg.content or "{}"
-
-            output_obj = agent.output_type.model_validate_json(raw_json)
-            return AgentResult(final_output=output_obj)
-
-        except Exception as e:
-            # Fallback seguro para simulação de validação
-            if "EQ-999" in user_prompt:
-                fallback_output = DiagnosticoEquipamento(
-                    codigo="EQ-INEXISTENTE",
-                    causa_provavel="Equipamento informado não existe no manual (Erro tratado assincronamente).",
-                    acao_recomendada="Solicitar recadastramento do equipamento junto à engenharia.",
-                    pecas_recomendadas=[],
-                )
-            else:
-                fallback_output = DiagnosticoEquipamento(
-                    codigo="EQ-101",
-                    causa_provavel="Cavitação na sucção (ERR-01 no manual da Bomba BC-2000).",
-                    acao_recomendada="Despressurizar o sistema e substituir o selo mecânico desgastado.",
-                    pecas_recomendadas=[
-                        PecaRecomendada(
-                            nome="Selo Mecânico Gaxeta BC-2000",
-                            quantidade=2,
-                            prioridade="Alta",
-                        ),
-                        PecaRecomendada(
-                            nome="Anel O-Ring Nitrílico 50mm",
-                            quantidade=4,
-                            prioridade="Média",
-                        ),
-                    ],
-                )
-            return AgentResult(final_output=fallback_output)
-
-
-# --- EXECUÇÃO DEMONSTRATIVA ---
+# --- 3. EXECUÇÃO DEMONSTRATIVA ---
 
 
 async def main():
     print("=" * 70)
-    print(" EXERCÍCIO 8 - MODELOS ANINHADOS E AGENTE DE DIAGNÓSTICO COMPLETO ")
+    print(" EXERCÍCIO 8 - MODELOS ANINHADOS E AGENTE DE DIAGNÓSTICO COMPLETO (SDK) ")
     print("=" * 70)
+
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    if not model_name or "/" in model_name:
+        model_name = "gpt-4o-mini"
 
     agente_completo = Agent(
         name="AgenteDiagnosticoCompleto",
         instructions=(
-            "Você é um agente especialista em diagnóstico industrial. "
-            "Sempre consulte a ferramenta assíncrona de manual para identificar a falha e "
-            "recomende as peças de reposição necessárias no formato estruturado solicitado."
+            "Você é um agente especialista em diagnóstico industrial.\n"
+            "1. Consulte a ferramenta 'consultar_manual_async_tool' UMA ÚNICA VEZ para buscar as especificações do equipamento.\n"
+            "2. Preencha o relatório no formato DiagnosticoEquipamento. Caso o manual não especifique as peças exatas, infira e liste as peças recomendadas apropriadas (ex: Selo Mecânico, Filtro, Gaxeta).\n"
+            "3. IMPORTANTE: Após a primeira consulta da ferramenta (ou em caso de erro da ferramenta), NÃO chame a ferramenta novamente e responda imediatamente gerando o resultado estruturado."
         ),
         output_type=DiagnosticoEquipamento,
         tools=[consultar_manual_async_tool],
+        model=model_name,
     )
 
     # 1. TESTE COM CÓDIGO DE EQUIPAMENTO VÁLIDO (EQ-101)
@@ -293,7 +118,6 @@ async def main():
     prompt_valido = "Diagnostique o problema no equipamento EQ-101 referente ao erro ERR-01 e recomende as peças de reposição."
     result_valido = await Runner.run(agente_completo, prompt_valido)
 
-    # Verificação do acesso via result.final_output
     diagnostico_valido: DiagnosticoEquipamento = result_valido.final_output
 
     print("--- Resultado Acessado via result.final_output ---")

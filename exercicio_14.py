@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 import uuid
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
@@ -9,17 +10,15 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
-# Importa os modelos Pydantic de diagnóstico do Exercício 8
+from agents import Agent, Runner, SQLiteSession
 from exercicio_08 import (
     DiagnosticoEquipamento,
     PecaRecomendada,
     consultar_manual_async_tool,
 )
-from exercicio_11 import AgentIntegrador, RunnerIntegrador, SQLiteSession
+from exercicio_10 import buscar_no_manual_extenso_rag
 
 load_dotenv()
-
-# --- 1. SCHEMAS PYDANTIC DA API REST COMPLETA ---
 
 
 class SubmissionRequest(BaseModel):
@@ -75,84 +74,50 @@ class ErrorDetailResponse(BaseModel):
     timestamp: str = Field(..., description="Data/hora UTC do evento")
 
 
-# --- 2. INICIALIZAÇÃO DA APLICAÇÃO REST FASTAPI ---
-
 app = FastAPI(
     title="Serviço REST Completo do Agente Integrador de Despacho",
-    description="API REST End-to-End para submissão, acompanhamento e obtenção de diagnósticos estruturados Pydantic.",
+    description="API REST End-to-End para submissão, acompanhamento e obtenção de diagnósticos estruturados Pydantic com OpenAI Agents SDK.",
     version="1.0.0",
 )
 
-# Tabela global de tarefas em memória
 TASKS_DB: Dict[str, Dict[str, Any]] = {}
-
-
-# --- 3. PROCESSAMENTO BACKGROUND INTEGRADOR ---
 
 
 async def processar_diagnostico_completo_background(
     task_id: str, codigo_equipamento: str, pergunta: str, session_id: str
 ):
-    """Executa o agente integrador assíncrono gerando a saída Pydantic DiagnosticoEquipamento em segundo plano."""
     start_time = time.time()
     print(
         f"\n ⚙️ [BACKGROUND TASK - TaskID '{task_id}'] Processando diagnóstico completo para '{codigo_equipamento}'..."
     )
 
     try:
+        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        if not model_name or "/" in model_name:
+            model_name = "gpt-4o-mini"
+
         session = SQLiteSession(session_id=session_id)
-        agente = AgentIntegrador(
+        agente = Agent(
             name="AgenteIntegradorRESTCompleto",
             instructions=(
-                "Você é um especialista em diagnóstico industrial. Sintetize a resposta no formato "
-                "JSON Pydantic com 'codigo', 'causa_provavel', 'acao_recomendada' e a lista 'pecas_recomendadas'."
+                "Você é um especialista em diagnóstico industrial.\n"
+                "1. Consulte a ferramenta 'buscar_no_manual_extenso_rag' UMA ÚNICA VEZ para buscar o manual do equipamento.\n"
+                "2. Preencha o relatório no formato DiagnosticoEquipamento. Infira e inclua as peças de reposição recomendadas adequadas (ex: Selo Mecânico, Filtro, Gaxeta).\n"
+                "3. IMPORTANTE: Após consultar a ferramenta uma vez, responda imediatamente preenchendo a saída estruturada sem realizar novas chamadas a ferramentas."
             ),
+            output_type=DiagnosticoEquipamento,
+            tools=[buscar_no_manual_extenso_rag],
+            model=model_name,
         )
 
         prompt_completo = (
             f"Equipamento: {codigo_equipamento}. Dúvida: {pergunta}"
         )
-        resposta_texto = await RunnerIntegrador.run(
-            agente, prompt_completo, session, use_rag=True
-        )
 
-        # Constrói a saída Pydantic DiagnosticoEquipamento (Exercício 8)
-        if (
-            "EQ-101" in codigo_equipamento.upper()
-            or "ERR-01" in pergunta.upper()
-        ):
-            diag_output = DiagnosticoEquipamento(
-                codigo=codigo_equipamento,
-                causa_provavel="Cavitação na sucção devido a baixa pressão de entrada (ERR-01 no manual da BC-2000).",
-                acao_recomendada="Despressurizar a linha de sucção, verificar o filtro de entrada e substituir o selo mecânico.",
-                pecas_recomendadas=[
-                    PecaRecomendada(
-                        nome="Selo Mecânico Gaxeta BC-2000",
-                        quantidade=2,
-                        prioridade="Alta",
-                    ),
-                    PecaRecomendada(
-                        nome="Anel O-Ring Nitrílico 50mm",
-                        quantidade=4,
-                        prioridade="Média",
-                    ),
-                ],
-            )
-        else:
-            diag_output = DiagnosticoEquipamento(
-                codigo=codigo_equipamento,
-                causa_provavel="Análise de engenharia concluída com sucesso com base no manual de fábrica.",
-                acao_recomendada="Executar inspeção visual e reaperto dos parafusos de fixação.",
-                pecas_recomendadas=[
-                    PecaRecomendada(
-                        nome="Kit de Juntas Sintéticas",
-                        quantidade=1,
-                        prioridade="Média",
-                    )
-                ],
-            )
-
+        result = await Runner.run(agente, prompt_completo, session=session)
         elapsed = round(time.time() - start_time, 3)
+
+        diag_output: DiagnosticoEquipamento = result.final_output
 
         TASKS_DB[task_id]["status"] = "done"
         TASKS_DB[task_id]["diagnostico_output"] = diag_output
@@ -173,9 +138,6 @@ async def processar_diagnostico_completo_background(
         print(f" ❌ [BACKGROUND TASK - TaskID '{task_id}'] Erro: {e}")
 
 
-# --- 4. ENDPOINTS REST COMPLETOS ---
-
-
 @app.post(
     "/agent/run",
     response_model=SubmissionResponse,
@@ -185,7 +147,6 @@ async def processar_diagnostico_completo_background(
 async def post_agent_run(
     request: SubmissionRequest, background_tasks: BackgroundTasks
 ) -> SubmissionResponse:
-    """Submete a pergunta, inicia o background task e retorna 202 Accepted com o task_id."""
     task_id = f"task-{uuid.uuid4().hex[:8]}"
 
     TASKS_DB[task_id] = {
@@ -217,10 +178,6 @@ async def post_agent_run(
     summary="Consultar Status do Processamento",
 )
 async def get_agent_status(task_id: str) -> TaskStatusResponse:
-    """Retorna o estado do processamento ('pending', 'done', 'error').
-
-    DECISÃO DE PROJETO: Trata task_id inexistente retornando HTTP 404 Not Found com detalhamento explícito.
-    """
     if task_id not in TASKS_DB:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -247,7 +204,6 @@ async def get_agent_status(task_id: str) -> TaskStatusResponse:
     summary="Obter Resultado Estruturado Pydantic Final (com Peças)",
 )
 async def get_agent_response(task_id: str) -> DiagnosticoEquipamento:
-    """Retorna o objeto Pydantic DiagnosticoEquipamento completo (incluindo a lista de peças) quando status='done'."""
     if task_id not in TASKS_DB:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -275,17 +231,13 @@ async def get_agent_response(task_id: str) -> DiagnosticoEquipamento:
     return task_data["diagnostico_output"]
 
 
-# --- EXECUÇÃO DEMONSTRATIVA END-TO-END VIA TESTCLIENT ---
-
-
 async def executar_fluxo_completo_end_to_end():
     client = TestClient(app)
 
     print("=" * 70)
-    print(" EXERCÍCIO 14 - SÍNTESE: O AGENTE COMO SERVIÇO REST COMPLETO ")
+    print(" EXERCÍCIO 14 - SÍNTESE: O AGENTE COMO SERVIÇO REST COMPLETO (SDK) ")
     print("=" * 70)
 
-    # 1. TESTE DE SUBMISSÃO POST /agent/run
     print(
         "\n[ETAPA 1: Submissão do Chamado via POST /agent/run (Equipamento EQ-101)]"
     )
@@ -309,7 +261,6 @@ async def executar_fluxo_completo_end_to_end():
         f"Task ID Gerado: {task_id} (Status Inicial: '{data_post['status']}')"
     )
 
-    # 2. POLLING DO STATUS VIA GET /agent/status/{task_id}
     print("\n" + "-" * 70)
     print(
         f"[ETAPA 2: Polling de Acompanhamento via GET /agent/status/{task_id}]"
@@ -322,13 +273,12 @@ async def executar_fluxo_completo_end_to_end():
         status_curr = res_status.json()["status"]
         print(f" -> Polling #{attempts}: Status = '{status_curr}'")
 
-        if status_curr == "done":
+        if status_curr in ("done", "error"):
             break
         await asyncio.sleep(0.1)
 
     print(f"✅ Polling Concluído! O processamento background atingiu 'done'.")
 
-    # 3. OBTENÇÃO DO DIAGNÓSTICO ESTRUTURADO PYDANTIC VIA GET /agent/response/{task_id}
     print("\n" + "-" * 70)
     print(
         f"[ETAPA 3: Obtenção do Resultado Final via GET /agent/response/{task_id}]"
@@ -351,7 +301,6 @@ async def executar_fluxo_completo_end_to_end():
             f"  - [{peca['prioridade']}] {peca['nome']} (Qtd: {peca['quantidade']})"
         )
 
-    # 4. TESTE DE TRATAMENTO DE task_id INEXISTENTE (Decisão de Projeto)
     print("\n" + "=" * 70)
     print(" [TESTE DA DECISÃO DE PROJETO]: Consulta a task_id Inexistente ")
     print("=" * 70)

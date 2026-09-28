@@ -31,7 +31,7 @@ Ao forçar a resposta via `response_format={"type": "json_object"}` e validar co
 
 ### 3. Persistência de Contexto com `SQLiteSession`
 
-Para simular o acompanhamento contínuo dos técnicos de campo, foi criada a classe `SQLiteSession`, que salva e recupera as mensagens (`user`, `assistant`, `tool`) em uma tabela SQLite (`agent_sessions.db`).
+Para o acompanhamento contínuo dos técnicos de campo, utilizou-se a primitiva `SQLiteSession` do OpenAI Agents SDK, que salva e recupera as mensagens (`user`, `assistant`, `tool`) em uma tabela SQLite (`agent_sessions.db`).
 
 No teste multi-turno executado:
 - **Pergunta 1**: *"Diagnostique a falha ERR-01 no equipamento EQ-101."* -> O agente consultou a ferramenta, salvou o contexto do `EQ-101` no SQLite e gerou o modelo Pydantic.

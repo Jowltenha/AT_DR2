@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -7,17 +8,13 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
-# Importa as estruturas do Exercício 11 para integração real no background task
-from exercicio_11 import AgentIntegrador, RunnerIntegrador, SQLiteSession
+from agents import Agent, Runner, SQLiteSession
+from exercicio_10 import buscar_no_manual_extenso_rag
 
 load_dotenv()
 
-# --- 1. MODELOS PYDANTIC PARA REQUEST E RESPONSE SCHEMAS ---
-
 
 class AgentQueryRequest(BaseModel):
-    """Modelo Pydantic para validação do payload HTTP POST recebido do sistema de despacho."""
-
     codigo_equipamento: str = Field(
         ...,
         description="Código identificador único do equipamento (ex: CG-800, EQ-101)",
@@ -37,8 +34,6 @@ class AgentQueryRequest(BaseModel):
 
 
 class AgentQueryResponse(BaseModel):
-    """Modelo Pydantic para o corpo da resposta do POST (retornado imediatamente ao sistema externo)."""
-
     task_id: str = Field(
         ..., description="Identificador único da tarefa assíncrona gerada"
     )
@@ -55,8 +50,6 @@ class AgentQueryResponse(BaseModel):
 
 
 class AgentTestResponse(BaseModel):
-    """Modelo Pydantic para o corpo da resposta do GET (retorna valor fixo de teste/healthcheck)."""
-
     status: str = Field(
         default="ok", description="Status de integridade do serviço"
     )
@@ -72,52 +65,46 @@ class AgentTestResponse(BaseModel):
     )
 
 
-# --- 2. INICIALIZAÇÃO DA APLICAÇÃO FASTAPI E ARMAZENAMENTO DE TAREFAS ---
-
 app = FastAPI(
     title="Serviço REST do Agente Integrador de Manutenção",
     description="Interface HTTP REST exposta para o sistema de despacho de chamados de campo.",
     version="1.0.0",
 )
 
-# Dicionário em memória simulando a tabela de tarefas de background
 TASKS_DB: Dict[str, Dict[str, Any]] = {}
-
-
-# --- 3. PROCESSAMENTO EM SEGUNDO PLANO (BackgroundTasks) ---
 
 
 async def processar_chamada_agente_background(
     task_id: str, codigo_equipamento: str, pergunta: str, session_id: str
 ):
-    """Função de background executada assincronamente via BackgroundTasks.
-
-    Invoca o agente integrador (RAG + SQLiteSession) sem bloquear o retorno HTTP.
-    """
+    """Função de background executada assincronamente via BackgroundTasks utilizando o OpenAI Agents SDK."""
     print(
         f"\n ⚙️ [BACKGROUND TASK iniciada - TaskID: {task_id}] Processando RAG + Agent para {codigo_equipamento}..."
     )
 
     try:
+        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        if not model_name or "/" in model_name:
+            model_name = "gpt-4o-mini"
+
         session = SQLiteSession(session_id=session_id)
-        agente = AgentIntegrador(
+        agente = Agent(
             name="AgenteIntegradorREST",
             instructions="Você é um assistente técnico exposto via API REST.",
+            tools=[buscar_no_manual_extenso_rag],
+            model=model_name,
         )
 
         prompt_completo = (
             f"Equipamento: {codigo_equipamento}. Pergunta: {pergunta}"
         )
 
-        # Execução do agente integrador (RAG + SQLite) em segundo plano
-        resposta_agente = await RunnerIntegrador.run(
-            agente, prompt_completo, session, use_rag=True
-        )
+        result = await Runner.run(agente, prompt_completo, session=session)
 
         TASKS_DB[task_id] = {
             "status": "done",
             "codigo_equipamento": codigo_equipamento,
-            "resposta": resposta_agente,
+            "resposta": str(result.final_output),
             "finished_at": datetime.now(timezone.utc).isoformat(),
         }
         print(
@@ -130,12 +117,7 @@ async def processar_chamada_agente_background(
             "erro": str(e),
             "finished_at": datetime.now(timezone.utc).isoformat(),
         }
-        print(
-            f" ❌ [BACKGROUND TASK erro - TaskID: {task_id}]: {e}"
-        )
-
-
-# --- 4. ENDPOINTS HTTP DA API REST ---
+        print(f" ❌ [BACKGROUND TASK erro - TaskID: {task_id}]: {e}")
 
 
 @app.get(
@@ -144,7 +126,6 @@ async def processar_chamada_agente_background(
     summary="Endpoint GET de Teste e Sanidade do Serviço",
 )
 async def get_agent_test() -> AgentTestResponse:
-    """Endpoint GET assíncrono que retorna um valor fixo de teste validado pelo Pydantic."""
     return AgentTestResponse(
         status="ok",
         servico="Agente Integrador REST Service",
@@ -162,10 +143,6 @@ async def get_agent_test() -> AgentTestResponse:
 async def post_agent_diagnostico(
     request_data: AgentQueryRequest, background_tasks: BackgroundTasks
 ) -> AgentQueryResponse:
-    """Endpoint POST assíncrono que recebe o payload Pydantic e agenda o agente via BackgroundTasks,
-
-    respondendo imediatamente (HTTP 202 Accepted).
-    """
     task_id = f"task-{uuid.uuid4().hex[:8]}"
 
     TASKS_DB[task_id] = {
@@ -174,7 +151,6 @@ async def post_agent_diagnostico(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Enfileira a tarefa pesada em segundo plano via BackgroundTasks
     background_tasks.add_task(
         processar_chamada_agente_background,
         task_id,
@@ -183,16 +159,12 @@ async def post_agent_diagnostico(
         request_data.session_id,
     )
 
-    # Retorna resposta imediata para o sistema de despacho sem bloquear a requisição HTTP
     return AgentQueryResponse(
         task_id=task_id,
         status="queued",
         mensagem="Solicitação de diagnóstico recebida e enviada para processamento em segundo plano.",
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
-
-
-# --- EXECUÇÃO DEMONSTRATIVA VIA TESTCLIENT ---
 
 
 def main():
@@ -202,17 +174,15 @@ def main():
 
     client = TestClient(app)
 
-    # 1. Teste do Endpoint GET /agent/test (Retorno Fixo Validado com Pydantic)
     print("\n[1. Testando Endpoint GET /agent/test (Retorno Fixo Pydantic)]")
     res_get = client.get("/agent/test")
     print(f"HTTP Status Code: {res_get.status_code}")
     print("Corpo da Resposta (AgentTestResponse):")
     print(res_get.json())
 
-    # 2. Teste do Endpoint POST /agent/diagnostico (Resposta Imediata via BackgroundTasks)
     print("\n" + "-" * 70)
     print(
-        "[2. Testando Endpoint POST /agent/diagnostico (BackgroundTasks Imprudente/Não Bloqueante)]"
+        "[2. Testando Endpoint POST /agent/diagnostico (BackgroundTasks Não Bloqueante)]"
     )
 
     payload = {

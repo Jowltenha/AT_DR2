@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 import uuid
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from dotenv import load_dotenv
@@ -9,16 +10,13 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
-from exercicio_11 import AgentIntegrador, RunnerIntegrador, SQLiteSession
+from agents import Agent, Runner, SQLiteSession
+from exercicio_10 import buscar_no_manual_extenso_rag
 
 load_dotenv()
 
-# --- 1. MODELOS PYDANTIC PARA REQUEST E RESPONSE DE SUBMISSÃO E POLLING ---
-
 
 class SubmissionRequest(BaseModel):
-    """Modelo Pydantic para validação do payload de submissão do chamado."""
-
     codigo_equipamento: str = Field(
         ..., description="Código único do equipamento", examples=["CG-800"]
     )
@@ -34,8 +32,6 @@ class SubmissionRequest(BaseModel):
 
 
 class SubmissionResponse(BaseModel):
-    """Modelo Pydantic retornado imediatamente pelo POST /agent/run (HTTP 202 Accepted)."""
-
     task_id: str = Field(
         ..., description="Identificador único da tarefa gerada para polling"
     )
@@ -52,8 +48,6 @@ class SubmissionResponse(BaseModel):
 
 
 class TaskStatusResponse(BaseModel):
-    """Modelo Pydantic retornado pelo GET /agent/status/{task_id}."""
-
     task_id: str = Field(..., description="ID da tarefa consultada")
     status: str = Field(
         ...,
@@ -76,50 +70,45 @@ class TaskStatusResponse(BaseModel):
     )
 
 
-# --- 2. INICIALIZAÇÃO DA API FASTAPI E ARMAZENAMENTO DE ESTADO ---
-
 app = FastAPI(
     title="Serviço REST Assíncrono de Despacho (Polling Pattern)",
     description="Implementação do padrão de submissão assíncrona POST /agent/run e consulta de status GET /agent/status/{task_id}.",
     version="1.0.0",
 )
 
-# Banco de dados de tarefas em memória para rastreamento de estados real-time
 TASKS_STORE: Dict[str, Dict[str, Any]] = {}
-
-
-# --- 3. PROCESSAMENTO BACKGROUND REAL ---
 
 
 async def executar_diagnostico_background(
     task_id: str, codigo_equipamento: str, pergunta: str, session_id: str
 ):
-    """Executa a tarefa pesada do agente integrador em background e atualiza o estado de 'pending' para 'done' ou 'error'."""
     start_time = time.time()
     print(
         f"\n ⚙️ [BACKGROUND PROCESS] Iniciando execução para TaskID '{task_id}' (Status: pending -> processando)..."
     )
 
     try:
+        model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        if not model_name or "/" in model_name:
+            model_name = "gpt-4o-mini"
+
         session = SQLiteSession(session_id=session_id)
-        agente = AgentIntegrador(
+        agente = Agent(
             name="AgenteAsyncPolling",
             instructions="Você é um assistente técnico em serviço REST assíncrono.",
+            tools=[buscar_no_manual_extenso_rag],
+            model=model_name,
         )
 
         prompt_completo = (
             f"Equipamento: {codigo_equipamento}. Pergunta: {pergunta}"
         )
 
-        # Execução do agente integrador (RAG + SQLiteSession)
-        resposta_agente = await RunnerIntegrador.run(
-            agente, prompt_completo, session, use_rag=True
-        )
-
+        result = await Runner.run(agente, prompt_completo, session=session)
         elapsed = round(time.time() - start_time, 3)
 
         TASKS_STORE[task_id]["status"] = "done"
-        TASKS_STORE[task_id]["resultado"] = resposta_agente
+        TASKS_STORE[task_id]["resultado"] = str(result.final_output)
         TASKS_STORE[task_id]["tempo_execucao_segundos"] = elapsed
         TASKS_STORE[task_id]["finished_at"] = datetime.now(
             timezone.utc
@@ -139,9 +128,6 @@ async def executar_diagnostico_background(
         )
 
 
-# --- 4. ENDPOINTS HTTP DE SUBMISSÃO E POLLING ---
-
-
 @app.post(
     "/agent/run",
     response_model=SubmissionResponse,
@@ -151,13 +137,8 @@ async def executar_diagnostico_background(
 async def post_agent_run(
     request: SubmissionRequest, background_tasks: BackgroundTasks
 ) -> SubmissionResponse:
-    """Recebe a pergunta do técnico, dispara o processamento em background (BackgroundTasks)
-
-    e retorna imediatamente 202 Accepted contendo o task_id para consulta.
-    """
     task_id = f"task-{uuid.uuid4().hex[:8]}"
 
-    # Registra no estado inicial como 'pending'
     TASKS_STORE[task_id] = {
         "task_id": task_id,
         "status": "pending",
@@ -168,7 +149,6 @@ async def post_agent_run(
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Enfileira o processamento em background
     background_tasks.add_task(
         executar_diagnostico_background,
         task_id,
@@ -177,7 +157,6 @@ async def post_agent_run(
         request.session_id,
     )
 
-    # Retorna resposta imediata com o task_id gerado
     return SubmissionResponse(
         task_id=task_id,
         status="pending",
@@ -192,7 +171,6 @@ async def post_agent_run(
     summary="Consultar Estado do Processamento pelo task_id",
 )
 async def get_agent_status(task_id: str) -> TaskStatusResponse:
-    """Consulta o estado atual da tarefa ('pending', 'done' ou 'error') pelo task_id."""
     if task_id not in TASKS_STORE:
         raise HTTPException(
             status_code=404,
@@ -212,9 +190,6 @@ async def get_agent_status(task_id: str) -> TaskStatusResponse:
     )
 
 
-# --- EXECUÇÃO DEMONSTRATIVA VIA TESTCLIENT ---
-
-
 async def demonstrar_fluxo_assincrono():
     client = TestClient(app)
 
@@ -222,7 +197,6 @@ async def demonstrar_fluxo_assincrono():
     print(" EXERCÍCIO 13 - PADRÃO DE SUBMISSÃO E CONSULTA ASSÍNCRONA (POLLING) ")
     print("=" * 70)
 
-    # 1. SUBMISSÃO POST /agent/run
     print("\n[ETAPA 1: Submetendo pergunta via POST /agent/run]")
     payload = {
         "codigo_equipamento": "CG-800",
@@ -243,7 +217,6 @@ async def demonstrar_fluxo_assincrono():
     print("Corpo da Resposta do POST (SubmissionResponse):")
     print(json.dumps(data_post, indent=2, ensure_ascii=False))
 
-    # 2. CONSULTA IMEDIATA GET /agent/status/{task_id} (Deverá retornar 'pending')
     print("\n" + "-" * 70)
     print(
         f"[ETAPA 2: Consulta Imediata via GET /agent/status/{task_id} (Esperado: status='pending')]"
@@ -253,11 +226,9 @@ async def demonstrar_fluxo_assincrono():
     print("Corpo da Resposta (TaskStatusResponse):")
     print(json.dumps(res_status_1.json(), indent=2, ensure_ascii=False))
 
-    # 3. AGUARDAR O PROCESSAMENTO BACKGROUND
     print("\n -> Aguardando conclusão da BackgroundTask em segundo plano...")
     await asyncio.sleep(0.5)
 
-    # 4. CONSULTA FINAL GET /agent/status/{task_id} (Deverá retornar 'done')
     print("\n" + "-" * 70)
     print(
         f"[ETAPA 3: Consulta Final via GET /agent/status/{task_id} (Esperado: status='done')]"

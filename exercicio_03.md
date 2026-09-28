@@ -28,12 +28,12 @@ Para o agente de diagnóstico técnico industrial, a mensagem de sistema (`SYSTE
 
 ---
 
-### 3. Execução Síncrona vs. Assíncrona e Saída Estruturada (`output_type`)
+### 3. Execução Assíncrona e Saída Estruturada (`output_type`)
 
 O código implementado em `exercicio_03.py` utiliza o **Pydantic** (`DiagnosticOutput`) como `output_type` para garantir que o agente responda em um formato JSON previsível e tipado.
 
-- **`Runner.run` (Assíncrono)**: Executado com `await` para a pergunta técnica sobre a caldeira e motor a 90°C. O agente aplicou corretamente as regras `SEG-01` e `SEG-02` no resultado estruturado.
-- **`Runner.run_sync` (Síncrono)**: Executado de forma bloqueante síncrona para a pergunta administrativa sobre férias e reembolso, demonstrando a recusa de atendimento por restrição de domínio.
+- **`Runner.run` (Chamada Assíncrona 1)**: Executado com `await` para a pergunta técnica sobre a caldeira e motor a 90°C. O agente aplicou corretamente as regras `SEG-01` e `SEG-02` no resultado estruturado.
+- **`Runner.run` (Chamada Assíncrona 2)**: Executado para a pergunta administrativa sobre férias e reembolso, demonstrando a recusa de atendimento por restrição de domínio.
 
 ---
 

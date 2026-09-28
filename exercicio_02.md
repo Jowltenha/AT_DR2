@@ -33,5 +33,6 @@ Os parâmetros de geração de LLMs devem ser ajustados de acordo com o objetivo
 
 A captura de tela abaixo exibe a execução completa do script `exercicio_02.py` no terminal.
 
-![Evidência de Execução do Exercício 2](evidencias/exercicio_02.png)
+![Evidência de Execução do Exercício 2](evidencias/exercicio_02_1.png)
+![Evidência de Execução do Exercício 2](evidencias/exercicio_02_2.png)
 

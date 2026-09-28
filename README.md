@@ -51,7 +51,7 @@ Em conformidade com as orientações do trabalho, a tabela abaixo detalha o uso 
 ├── .gitignore            # Arquivos ignorados pelo Git (venv, .env, etc.)
 ├── README.md             # Documentação central e citação obrigatória de uso de IA
 ├── Rodando.md            # Guia completo de configuração e execução dos exercícios
-├── requirements.txt      # Dependências Python do projeto (openai, fastapi, uvicorn, pydantic)
+├── requirements.txt      # Dependências Python do projeto (openai-agents, openai, fastapi, uvicorn, pydantic)
 ├── gerar_manual.py       # Script de geração de dados JSON de manuais (seed 42)
 ├── gerar_manual_extenso.py # Script de geração do manual extenso (22 parágrafos)
 ├── exercicio_01.py / .md # Exercício 1: Ambiente e primeiro agente

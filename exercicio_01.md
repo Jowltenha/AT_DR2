@@ -30,7 +30,7 @@ Considerando a eficiência técnica, latência e consumo de contexto:
 
 O código-fonte do exercício foi implementado no arquivo `exercicio_01.py` utilizando o pacote `python-dotenv` para carregar a variável `OPENAI_API_KEY` a partir do arquivo `.env` (fora do código-fonte), conforme as boas práticas de segurança.
 
-A solução assíncrona utiliza as classes `Agent` e `Runner` para instanciar as instruções do sistema ("responda perguntas gerais sobre equipamentos industriais") e realizar a chamada com `AsyncOpenAI`, `async/await` e `asyncio.run()`.
+A solução assíncrona utiliza as primitivas `Agent` e `Runner` importadas do pacote oficial `openai-agents`, realizando a execução com `async/await` e `asyncio.run()`.
 
 A função auxiliar `format_agent_response` foi construída para formatar o texto de saída antes da impressão no terminal.
 

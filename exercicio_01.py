@@ -1,60 +1,13 @@
 import asyncio
 import os
 from dotenv import load_dotenv
-from openai import AsyncOpenAI
+from agents import Agent, Runner
 
 load_dotenv()
-    
-
-class Agent:
-    """Representa o agente configurado com instruções do sistema e modelo."""
-
-    def __init__(
-        self, instructions: str, model: str = None
-    ):
-        self.instructions = instructions
-        self.model = model or os.getenv("OPENAI_MODEL", "ag/gemini-3.6-flash-high")
-        api_key = os.getenv("OPENAI_API_KEY", "mock-key")
-        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-
-    async def run(self, user_prompt: str) -> str:
-        """Executa a chamada assíncrona para o modelo da OpenAI."""
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.instructions},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.7,
-            )
-            return response.choices[0].message.content or ""
-        except Exception as e:
-            # Fallback para demonstração sem chave ativa
-            return (
-                f"[Simulação/Demonstração]: Resposta para '{user_prompt}' sobre equipamentos industriais.\n"
-                f"Detalhe técnico: Motores de indução trifásicos e bombas centrífugas requerem manutenção preditiva constante.\n"
-                f"(Info de erro real de API se aplicável: {e})"
-            )
-
-
-class Runner:
-    """Orquestra e executa o Agent de forma assíncrona."""
-
-    def __init__(self, agent: Agent):
-        self.agent = agent
-
-    async def execute(self, prompt: str) -> str:
-        """Método de execução assíncrona utilizando async/await."""
-        return await self.agent.run(prompt)
 
 
 def format_agent_response(response_text: str) -> str:
-    """Função auxiliar para formatação elegante da resposta do agente antes da impressão.
-
-    Gerada/Estruturada com apoio do Tab Completion / Command do Editor.
-    """
+    """Função auxiliar para formatação elegante da resposta do agente antes da impressão."""
     header = "=" * 60
     title = " AGENTE DE EQUIPAMENTOS INDUSTRIAIS - RESPOSTA "
     footer = "=" * 60
@@ -66,26 +19,29 @@ def format_agent_response(response_text: str) -> str:
 
 
 async def main():
-    print("Iniciando o Agente de Equipamentos Industriais...")
+    print("Iniciando o Agente de Equipamentos Industriais com OpenAI Agents SDK...")
 
-    # Instancia o Agent com instruções específicas do sistema
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    if not model_name or "/" in model_name:
+        model_name = "gpt-4o-mini"
+
+    # Instancia o Agent do OpenAI Agents SDK
     agent = Agent(
-        instructions="Você é um assistente especialista que responde perguntas gerais sobre equipamentos industriais de forma clara e objetiva."
+        name="AgenteEquipamentos",
+        instructions="Você é um assistente especialista que responde perguntas gerais sobre equipamentos industriais de forma clara e objetiva.",
+        model=model_name,
     )
 
-    # Instancia e executa através do Runner
-    runner = Runner(agent)
     prompt_usuario = "Quais são as principais rotinas de manutenção para uma bomba centrífuga?"
 
-    # Execução assíncrona com await
-    resposta_bruta = await runner.execute(prompt_usuario)
+    # Execução assíncrona utilizando o Runner oficial do SDK
+    result = await Runner.run(agent, prompt_usuario)
 
-    # Formatação com a função auxiliar
-    resposta_formatada = format_agent_response(resposta_bruta)
+    # Formatação da resposta final do agente
+    resposta_formatada = format_agent_response(str(result.final_output))
 
     print(resposta_formatada)
 
 
 if __name__ == "__main__":
-    # Execução do loop de eventos assíncrono
     asyncio.run(main())
